@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__df2dcace-4a21-4ce6-bf03-84fc1e2f6fb4__search_articles",
+      "mcp__df2dcace-4a21-4ce6-bf03-84fc1e2f6fb4__get_article_metadata",
+      "mcp__a31777cf-412a-4671-8c28-4253f32f3184__notion-search",
+      "mcp__a31777cf-412a-4671-8c28-4253f32f3184__notion-fetch"
+    ]
+  }
+}
