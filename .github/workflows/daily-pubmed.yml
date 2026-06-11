@@ -28,7 +28,7 @@ jobs:
           NOTION_DATABASE: ${{ secrets.NOTION_DATABASE }}
           NCBI_API_KEY:    ${{ secrets.NCBI_API_KEY }}
           NCBI_EMAIL:      ${{ secrets.NCBI_EMAIL }}
-        run: python tracker.py --notion --stdout
+        run: python tracker.py --notion --stdout --days 3
 
       - name: seen_pmids.json を commit
         run: |
