@@ -1,0 +1,40 @@
+name: 頭痛 PubMed 日次チェック
+
+on:
+  schedule:
+    - cron: "0 21 * * *"   # 毎日 UTC 21:00 = JST 06:00
+  workflow_dispatch:        # 手動実行も可能
+
+jobs:
+  fetch-and-post:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # seen_pmids.json を commit するため
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 新着論文を取得して Notion に投稿
+        env:
+          NOTION_TOKEN:    ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE: ${{ secrets.NOTION_DATABASE }}
+          NCBI_API_KEY:    ${{ secrets.NCBI_API_KEY }}
+          NCBI_EMAIL:      ${{ secrets.NCBI_EMAIL }}
+        run: python tracker.py --notion --stdout
+
+      - name: seen_pmids.json を commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_pmids.json
+          git diff --cached --quiet || \
+            git commit -m "chore: update seen_pmids $(date +%Y-%m-%d)"
+          git push
