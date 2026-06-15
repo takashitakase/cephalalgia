@@ -67,13 +67,19 @@ def save_seen(pmids: set[str]) -> None:
 def _http(url: str, *, method: str = "GET", data: bytes | None = None,
           headers: dict | None = None) -> bytes:
     """HTTP リクエスト（リトライ付き）。"""
-    req = urllib.request.Request(
-        url, data=data, method=method,
-        headers={
-            "User-Agent": "cephalalgia-tracker/1.0 (Python urllib)",
-            **(headers or {}),
-        },
-    )
+    # urllib は HTTP ヘッダー値を latin-1 でエンコードするため、
+    # ASCII 範囲外の文字を含むヘッダー値はエンコードエラーになる。
+    # Request を構築する際はヘッダーを後から add_unredirected_header で追加し、
+    # バイト列として渡すことで回避する。
+    req = urllib.request.Request(url, data=data, method=method)
+    all_headers = {
+        "User-Agent": "cephalalgia-tracker/1.0 (Python urllib)",
+        **(headers or {}),
+    }
+    for k, v in all_headers.items():
+        # ヘッダー値を ASCII に限定（非 ASCII 文字は除去）
+        safe_v = v.encode("ascii", errors="ignore").decode("ascii") if isinstance(v, str) else v
+        req.add_unredirected_header(k, safe_v)
     for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
