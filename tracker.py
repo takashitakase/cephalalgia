@@ -84,6 +84,20 @@ def _http(url: str, *, method: str = "GET", data: bytes | None = None,
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return resp.read()
+        except urllib.error.HTTPError as exc:
+            # HTTPError は URLError のサブクラス。レスポンス本文に
+            # Notion/NCBI からの具体的なエラー理由が入っているので読み取る。
+            try:
+                body = exc.read().decode("utf-8", "replace")
+            except Exception:
+                body = ""
+            detail = f"HTTP Error {exc.code}: {body[:600]}"
+            # 4xx はリクエスト自体の誤りでリトライしても無駄。即座に詳細付きで投げる。
+            if 400 <= exc.code < 500 or attempt == 3:
+                raise RuntimeError(detail) from exc
+            wait = 2 ** attempt
+            print(f"  [警告] サーバエラー (HTTP {exc.code})、{wait}s 後リトライ...", file=sys.stderr)
+            time.sleep(wait)
         except urllib.error.URLError as exc:
             if attempt == 3:
                 raise
@@ -246,6 +260,13 @@ def notion_post_article(article: dict, today: date, token: str, database_id: str
         properties["DOI"] = {"url": f"https://doi.org/{doi}"}
 
     if pub_date_iso:
+        # Notion の日付プロパティは YYYY-MM-DD 形式のみ受け付ける。
+        # PubMed は "2026" や "2026-06" のような月/年精度を返すことがあるため、
+        # 不足分を月初・年初で補完して有効な ISO 日付にする。
+        if len(pub_date_iso) == 4:        # YYYY
+            pub_date_iso += "-01-01"
+        elif len(pub_date_iso) == 7:      # YYYY-MM
+            pub_date_iso += "-01"
         properties["出版日"] = {"date": {"start": pub_date_iso}}
 
     if abstract:
