@@ -111,7 +111,10 @@ def search_pubmed(query: str, date_from: str, date_to: str, max_results: int) ->
     params = {
         **_ncbi_params(),
         "db": "pubmed", "term": query,
-        "datetype": "pdat", "mindate": date_from, "maxdate": date_to,
+        # edat = Entrez date（PubMed に収載された日）。
+        # pdat（出版日）は収載とのタイムラグが大きく、直近数日の窓では
+        # 新着論文をほとんど取りこぼすため、収載日ベースで検索する。
+        "datetype": "edat", "mindate": date_from, "maxdate": date_to,
         "retmax": max_results, "retmode": "json",
     }
     url  = NCBI_BASE + "esearch.fcgi?" + urllib.parse.urlencode(params)
