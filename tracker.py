@@ -69,13 +69,15 @@ def _http(url: str, *, method: str = "GET", data: bytes | None = None,
     """HTTP リクエスト（リトライ付き）。"""
     # urllib は HTTP ヘッダー値を latin-1 でエンコードするため、
     # ASCII 範囲外の文字を含むヘッダー値はエンコードエラーになる。
-    # add_unredirected_header で ASCII に限定した値を渡すことで回避する。
+    # Request を構築する際はヘッダーを後から add_unredirected_header で追加し、
+    # バイト列として渡すことで回避する。
     req = urllib.request.Request(url, data=data, method=method)
     all_headers = {
         "User-Agent": "cephalalgia-tracker/1.0 (Python urllib)",
         **(headers or {}),
     }
     for k, v in all_headers.items():
+        # ヘッダー値を ASCII に限定（非 ASCII 文字は除去）
         safe_v = v.encode("ascii", errors="ignore").decode("ascii") if isinstance(v, str) else v
         req.add_unredirected_header(k, safe_v)
     for attempt in range(4):
@@ -109,7 +111,10 @@ def search_pubmed(query: str, date_from: str, date_to: str, max_results: int) ->
     params = {
         **_ncbi_params(),
         "db": "pubmed", "term": query,
-        "datetype": "pdat", "mindate": date_from, "maxdate": date_to,
+        # edat = Entrez date（PubMed に収載された日）。
+        # pdat（出版日）は収載とのタイムラグが大きく、直近数日の窓では
+        # 新着論文をほとんど取りこぼすため、収載日ベースで検索する。
+        "datetype": "edat", "mindate": date_from, "maxdate": date_to,
         "retmax": max_results, "retmode": "json",
     }
     url  = NCBI_BASE + "esearch.fcgi?" + urllib.parse.urlencode(params)
