@@ -405,6 +405,7 @@ def main() -> int:
         print(report)
 
     # Notion 投稿
+    failed_pmids: set[str] = set()
     if args.notion:
         print(f"\nNotion に投稿中（DB: {notion_db}）...")
         ok = err = 0
@@ -422,6 +423,7 @@ def main() -> int:
             except Exception as exc:
                 print(f"  [エラー] {pmid} の投稿失敗: {exc}", file=sys.stderr)
                 err += 1
+                failed_pmids.add(pmid)  # 失敗分は既読にせず次回再試行する
         print(f"\nNotion 投稿完了: 成功 {ok} 件 / 失敗 {err} 件")
 
     if not args.stdout and not args.notion:
@@ -432,8 +434,9 @@ def main() -> int:
             trunc = title[:75] + "…" if len(title) > 75 else title
             print(f"  [{pmid}] {trunc}")
 
-    # 今回検索した PMID を既読として記録
-    seen.update(pmids)
+    # 今回検索した PMID を既読として記録（Notion 投稿に失敗した分は除き、
+    # 次回実行で再試行できるようにする）
+    seen.update(p for p in pmids if p not in failed_pmids)
     save_seen(seen)
 
     return 0
