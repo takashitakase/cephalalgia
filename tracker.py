@@ -13,7 +13,7 @@ PubMed 頭痛論文デイリートラッカー
     NCBI_API_KEY      NCBI E-utilities APIキー（省略可。設定すると 10 req/s まで可）
     NCBI_EMAIL        NCBI に通知するメールアドレス（省略可）
     NOTION_TOKEN      Notion インテグレーショントークン（--notion 使用時に必須）
-    NOTION_DATABASE   Notion データベース ID（省略時はデフォルトDBを使用）
+    NOTION_DATA_SOURCE Notion データソース ID（省略時はデフォルトを使用）
 
 cron 設定例（毎朝6時に実行）:
     0 6 * * * cd /path/to/cephalalgia && python tracker.py --notion >> cron.log 2>&1
@@ -42,6 +42,14 @@ SEARCH_QUERY = (
 
 # Notion データベース ID（既存: 頭痛関連 PubMed 新着論文）
 DEFAULT_NOTION_DATABASE = "1a5ec534-b29e-410e-b7d9-38fcfa888671"
+
+# Notion データソース ID（DB「頭痛関連 PubMed 新着論文」のデータソース）。
+# DB が複数データソースを持つ場合、旧 API の database_id 親では投稿先を
+# 特定できず 400 になるため、データソースを直接指定する。
+DEFAULT_NOTION_DATA_SOURCE = "e39642ec-ba2f-42bb-a8cd-39a7e7364afd"
+
+# data_source_id 親や /data_sources/{id}/query をサポートする API バージョン。
+NOTION_VERSION = "2025-09-03"
 
 SEEN_FILE  = Path("seen_pmids.json")
 REPORT_DIR = Path("reports")
@@ -207,12 +215,12 @@ def _parse_pubmed_date(raw: str) -> str | None:
 def _notion_headers(token: str) -> dict:
     return {
         "Authorization": f"Bearer {token}",
-        "Notion-Version": "2022-06-28",
+        "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
     }
 
 
-def notion_page_exists(pmid: str, token: str, database_id: str) -> bool:
+def notion_page_exists(pmid: str, token: str, data_source_id: str) -> bool:
     """同じ PMID のページが既に Notion DB に存在するか確認する。"""
     payload = json.dumps({
         "filter": {
@@ -220,12 +228,12 @@ def notion_page_exists(pmid: str, token: str, database_id: str) -> bool:
             "rich_text": {"equals": pmid},
         }
     }).encode()
-    url = f"{NOTION_API}/databases/{database_id}/query"
+    url = f"{NOTION_API}/data_sources/{data_source_id}/query"
     resp = json.loads(_http(url, method="POST", data=payload, headers=_notion_headers(token)))
     return len(resp.get("results", [])) > 0
 
 
-def notion_post_article(article: dict, today: date, token: str, database_id: str) -> str:
+def notion_post_article(article: dict, today: date, token: str, data_source_id: str) -> str:
     """論文1件を Notion データベースに投稿し、作成されたページURLを返す。"""
     pmid      = article.get("pmid", "")
     title     = article.get("title", "") or "(no title)"
@@ -275,7 +283,7 @@ def notion_post_article(article: dict, today: date, token: str, database_id: str
         }
 
     payload = json.dumps({
-        "parent": {"database_id": database_id},
+        "parent": {"type": "data_source_id", "data_source_id": data_source_id},
         "properties": properties,
     }).encode()
 
@@ -344,7 +352,7 @@ def main() -> int:
 
     # Notion モードの事前チェック
     notion_token = os.environ.get("NOTION_TOKEN")
-    notion_db    = os.environ.get("NOTION_DATABASE", DEFAULT_NOTION_DATABASE)
+    notion_ds    = os.environ.get("NOTION_DATA_SOURCE", DEFAULT_NOTION_DATA_SOURCE)
     if args.notion and not notion_token:
         print("[エラー] --notion を使うには環境変数 NOTION_TOKEN を設定してください。", file=sys.stderr)
         return 1
@@ -407,15 +415,15 @@ def main() -> int:
     # Notion 投稿
     failed_pmids: set[str] = set()
     if args.notion:
-        print(f"\nNotion に投稿中（DB: {notion_db}）...")
+        print(f"\nNotion に投稿中（データソース: {notion_ds}）...")
         ok = err = 0
         for a in summaries:
             pmid = a.get("pmid", "")
             try:
-                if not args.all and notion_page_exists(pmid, notion_token, notion_db):
+                if not args.all and notion_page_exists(pmid, notion_token, notion_ds):
                     print(f"  [スキップ] {pmid} は既に Notion に存在します")
                     continue
-                page_url = notion_post_article(a, today, notion_token, notion_db)
+                page_url = notion_post_article(a, today, notion_token, notion_ds)
                 print(f"  [投稿済] [{pmid}] {a.get('title', '')[:60]}…")
                 print(f"           {page_url}")
                 ok += 1
