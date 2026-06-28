@@ -84,6 +84,20 @@ def _http(url: str, *, method: str = "GET", data: bytes | None = None,
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return resp.read()
+        except urllib.error.HTTPError as exc:
+            # HTTPError は URLError のサブクラス。レスポンス本文に
+            # Notion/NCBI からの具体的なエラー理由が入っているので読み取る。
+            try:
+                body = exc.read().decode("utf-8", "replace")
+            except Exception:
+                body = ""
+            detail = f"HTTP Error {exc.code}: {body[:600]}"
+            # 4xx はリクエスト自体の誤りでリトライしても無駄。即座に詳細付きで投げる。
+            if 400 <= exc.code < 500 or attempt == 3:
+                raise RuntimeError(detail) from exc
+            wait = 2 ** attempt
+            print(f"  [警告] サーバエラー (HTTP {exc.code})、{wait}s 後リトライ...", file=sys.stderr)
+            time.sleep(wait)
         except urllib.error.URLError as exc:
             if attempt == 3:
                 raise
@@ -246,6 +260,13 @@ def notion_post_article(article: dict, today: date, token: str, database_id: str
         properties["DOI"] = {"url": f"https://doi.org/{doi}"}
 
     if pub_date_iso:
+        # Notion の日付プロパティは YYYY-MM-DD 形式のみ受け付ける。
+        # PubMed は "2026" や "2026-06" のような月/年精度を返すことがあるため、
+        # 不足分を月初・年初で補完して有効な ISO 日付にする。
+        if len(pub_date_iso) == 4:        # YYYY
+            pub_date_iso += "-01-01"
+        elif len(pub_date_iso) == 7:      # YYYY-MM
+            pub_date_iso += "-01"
         properties["出版日"] = {"date": {"start": pub_date_iso}}
 
     if abstract:
@@ -384,6 +405,7 @@ def main() -> int:
         print(report)
 
     # Notion 投稿
+    failed_pmids: set[str] = set()
     if args.notion:
         print(f"\nNotion に投稿中（DB: {notion_db}）...")
         ok = err = 0
@@ -401,6 +423,7 @@ def main() -> int:
             except Exception as exc:
                 print(f"  [エラー] {pmid} の投稿失敗: {exc}", file=sys.stderr)
                 err += 1
+                failed_pmids.add(pmid)  # 失敗分は既読にせず次回再試行する
         print(f"\nNotion 投稿完了: 成功 {ok} 件 / 失敗 {err} 件")
 
     if not args.stdout and not args.notion:
@@ -411,8 +434,9 @@ def main() -> int:
             trunc = title[:75] + "…" if len(title) > 75 else title
             print(f"  [{pmid}] {trunc}")
 
-    # 今回検索した PMID を既読として記録
-    seen.update(pmids)
+    # 今回検索した PMID を既読として記録（Notion 投稿に失敗した分は除き、
+    # 次回実行で再試行できるようにする）
+    seen.update(p for p in pmids if p not in failed_pmids)
     save_seen(seen)
 
     return 0
